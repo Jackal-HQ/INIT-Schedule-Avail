@@ -1,0 +1,548 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Room Availability</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%230b5cd5'/%3E%3Cpath d='M4 8.5l3 3 5-6' stroke='white' stroke-width='2' fill='none'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #f5f6f8; --surface: #ffffff; --surface-2: #f0f2f5; --border: #d9dde3;
+    --text: #1b2430; --muted: #5d6877; --accent: #0b5cd5; --accent-text: #ffffff;
+    --free: #1f9d55; --free-bg: #d9f3e3; --free-text: #0d5e32;
+    --busy: #8792a2; --busy-bg: #e3e6eb; --busy-text: #3a4452;
+    --danger: #b42318; --danger-bg: #fdeceb; --warn-bg: #fff4d6; --warn-text: #7a4b00;
+    --shadow: 0 1px 2px rgba(16,24,40,.06), 0 1px 3px rgba(16,24,40,.08);
+    --radius: 10px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f141a; --surface: #171e27; --surface-2: #1e2732; --border: #2c3846;
+      --text: #e6eaf0; --muted: #9aa6b6; --accent: #5b9bff; --accent-text: #0b1220;
+      --free: #3ecf82; --free-bg: #153a28; --free-text: #8be5b3;
+      --busy: #6b7788; --busy-bg: #262f3b; --busy-text: #b7c1ce;
+      --danger: #ff8a80; --danger-bg: #3a1c1a; --warn-bg: #3b2f10; --warn-text: #f6d58a;
+      --shadow: none;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f141a; --surface: #171e27; --surface-2: #1e2732; --border: #2c3846;
+    --text: #e6eaf0; --muted: #9aa6b6; --accent: #5b9bff; --accent-text: #0b1220;
+    --free: #3ecf82; --free-bg: #153a28; --free-text: #8be5b3;
+    --busy: #6b7788; --busy-bg: #262f3b; --busy-text: #b7c1ce;
+    --danger: #ff8a80; --danger-bg: #3a1c1a; --warn-bg: #3b2f10; --warn-text: #f6d58a;
+    --shadow: none;
+  }
+
+  * { box-sizing: border-box; }
+  html { color-scheme: light dark; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  .wrap { max-width: 1280px; margin: 0 auto; padding: 20px 16px 48px; }
+  header { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+  h1 { font-size: 22px; margin: 0; }
+  header p { margin: 0; color: var(--muted); }
+  .layout { display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: 16px; align-items: start; }
+  @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
+
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); }
+  form.card { padding: 16px; display: grid; gap: 16px; position: sticky; top: 12px; }
+  @media (max-width: 900px) { form.card { position: static; } }
+  fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
+  legend, label.lbl { font-weight: 600; font-size: 13px; margin-bottom: 6px; display: block; padding: 0; }
+  .hint { color: var(--muted); font-size: 12.5px; margin: 6px 0 0; }
+
+  input, select, button { font: inherit; color: inherit; }
+  input[type=text], input[type=date], input[type=time], select {
+    width: 100%; min-height: 40px; padding: 7px 10px; background: var(--surface);
+    border: 1px solid var(--border); border-radius: 8px;
+  }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .row label { display: block; font-size: 12.5px; color: var(--muted); margin-bottom: 3px; }
+
+  button { cursor: pointer; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); min-height: 36px; padding: 6px 12px; }
+  button:hover:not(:disabled) { background: var(--surface-2); }
+  button:disabled { opacity: .6; cursor: default; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; min-height: 42px; }
+  button.primary:hover:not(:disabled) { filter: brightness(1.08); background: var(--accent); }
+  button.link { border: 0; background: none; color: var(--accent); padding: 2px 4px; min-height: 0; }
+  button.link:hover:not(:disabled) { background: none; text-decoration: underline; }
+  .presets { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .presets button { min-height: 30px; padding: 3px 10px; font-size: 13px; }
+
+  /* room picker */
+  .picker { position: relative; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+  .chip { display: inline-flex; align-items: center; gap: 4px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 999px; padding: 2px 4px 2px 10px; font-size: 13.5px; }
+  .chip button { border: 0; background: none; min-height: 0; padding: 0 6px; font-size: 16px; line-height: 1.2; color: var(--muted); border-radius: 999px; }
+  .chip button:hover { color: var(--danger); background: none; }
+  .suggest { position: absolute; z-index: 20; left: 0; right: 0; top: 100%; margin-top: 4px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.18); max-height: 280px; overflow: auto; }
+  .suggest[hidden] { display: none; }
+  .suggest .opt { display: flex; justify-content: space-between; gap: 8px; width: 100%; text-align: left; border: 0; border-radius: 0; background: none; padding: 8px 10px; min-height: 0; }
+  .suggest .opt[aria-selected=true], .suggest .opt:hover { background: var(--surface-2); }
+  .suggest .opt small { color: var(--muted); }
+  .suggest .opt.all { font-weight: 600; color: var(--accent); border-bottom: 1px solid var(--border); }
+  .suggest .opt[disabled] { opacity: .5; }
+  .suggest .empty { padding: 10px; color: var(--muted); font-size: 13.5px; }
+
+  /* results */
+  .results { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; min-width: 0; }
+  .banner { padding: 10px 14px; border-radius: 8px; font-size: 14px; }
+  .banner.error { background: var(--danger-bg); color: var(--danger); border: 1px solid var(--danger); }
+  .banner.warn { background: var(--warn-bg); color: var(--warn-text); }
+  .banner .sugg { display: inline-flex; gap: 6px; flex-wrap: wrap; margin-left: 4px; }
+  .banner .sugg button { min-height: 26px; padding: 1px 9px; font-size: 13px; }
+  .welcome { padding: 28px 22px; color: var(--muted); }
+  .welcome h2 { color: var(--text); margin: 0 0 6px; font-size: 18px; }
+  .welcome ol { margin: 8px 0 0; padding-left: 20px; }
+
+  .summary { padding: 14px 16px; display: flex; flex-wrap: wrap; gap: 8px 28px; }
+  .stat b { display: block; font-size: 20px; line-height: 1.2; }
+  .stat span { color: var(--muted); font-size: 12.5px; }
+  .toolbar { padding: 10px 12px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  .toolbar .grow { flex: 1 1 160px; min-width: 120px; }
+  .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .seg button { border: 0; border-radius: 0; min-height: 34px; background: var(--surface); }
+  .seg button + button { border-left: 1px solid var(--border); }
+  .seg button[aria-pressed=true] { background: var(--accent); color: var(--accent-text); font-weight: 600; }
+
+  .tablewrap { overflow: auto; max-height: 70vh; }
+  table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+  th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  td.event { white-space: normal; min-width: 180px; }
+  th { position: sticky; top: 0; background: var(--surface-2); z-index: 1; font-size: 13px; }
+  th button { all: unset; cursor: pointer; display: inline-flex; gap: 4px; align-items: center; font-weight: 600; }
+  th button:focus-visible { outline: 2px solid var(--accent); }
+  th .arrow { color: var(--muted); font-size: 11px; }
+  tbody tr:hover { background: var(--surface-2); }
+  .badge { display: inline-block; padding: 1px 9px; border-radius: 999px; font-size: 12.5px; font-weight: 600; }
+  .badge.free { background: var(--free-bg); color: var(--free-text); }
+  .badge.busy { background: var(--busy-bg); color: var(--busy-text); }
+  .muted { color: var(--muted); }
+  .more { padding: 12px; text-align: center; }
+  .empty-state { padding: 36px 16px; text-align: center; color: var(--muted); }
+
+  /* timeline */
+  .timeline { padding: 4px 16px 16px; overflow-x: auto; }
+  .tl-room { margin-top: 14px; min-width: 440px; }
+  .tl-room h3 { margin: 0 0 4px; font-size: 15px; }
+  .tl-room h3 small { color: var(--muted); font-weight: 400; }
+  .tl-row { display: grid; grid-template-columns: 88px 1fr; align-items: center; gap: 8px; margin: 2px 0; }
+  .tl-label { font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .tl-label.weekend { opacity: .7; }
+  .tl-bar { position: relative; height: 22px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 5px; overflow: hidden; }
+  .tl-axis { position: relative; height: 16px; font-size: 11px; color: var(--muted); }
+  .tl-axis span { position: absolute; transform: translateX(-50%); white-space: nowrap; }
+  .tl-grid { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--border); opacity: .7; }
+  .seg-free, .seg-busy { position: absolute; top: 0; bottom: 0; font-size: 11px; line-height: 20px; padding: 0 4px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .seg-free { background: var(--free-bg); color: var(--free-text); box-shadow: inset 0 0 0 1px var(--free); }
+  .seg-busy { background: repeating-linear-gradient(135deg, var(--busy-bg), var(--busy-bg) 5px, var(--surface-2) 5px, var(--surface-2) 9px); color: var(--busy-text); box-shadow: inset 0 0 0 1px var(--busy); }
+  .legend { display: flex; gap: 16px; padding: 12px 16px 0; font-size: 13px; color: var(--muted); flex-wrap: wrap; }
+  .legend i { display: inline-block; width: 14px; height: 14px; border-radius: 3px; vertical-align: -2px; margin-right: 5px; }
+  .legend .f { background: var(--free-bg); border: 2px solid var(--free); }
+  .legend .b { background: var(--busy-bg); border: 2px solid var(--busy); }
+
+  .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .7s linear infinite; vertical-align: -2px; margin-right: 6px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Room Availability</h1>
+    <p>FIU 25Live &middot; pick rooms and dates to see when they're free</p>
+  </header>
+
+  <div class="layout">
+    <form class="card" id="form" autocomplete="off">
+      <fieldset>
+        <legend id="rooms-legend">Rooms</legend>
+        <div class="chips" id="chips" aria-label="Selected rooms"></div>
+        <div class="picker">
+          <input type="text" id="room-input" role="combobox" aria-expanded="false" aria-controls="suggest"
+                 aria-labelledby="rooms-legend" placeholder="Search a building or room, e.g. CASE" spellcheck="false">
+          <div class="suggest" id="suggest" role="listbox" hidden></div>
+        </div>
+        <p class="hint">Type a building (<b>CASE</b>) to browse, or an exact room (<b>CASE132</b>) and press Enter. Paste a comma-separated list to add many.
+          <button type="button" class="link" id="clear-rooms" hidden>Clear all</button></p>
+      </fieldset>
+
+      <fieldset>
+        <legend>Dates</legend>
+        <div class="row">
+          <div><label for="start">From</label><input type="date" id="start" required></div>
+          <div><label for="end">To</label><input type="date" id="end" required></div>
+        </div>
+        <div class="presets" role="group" aria-label="Date presets">
+          <button type="button" data-preset="today">Today</button>
+          <button type="button" data-preset="week">This week</button>
+          <button type="button" data-preset="7">Next 7 days</button>
+          <button type="button" data-preset="14">Next 14 days</button>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Daily hours</legend>
+        <div class="row">
+          <div><label for="from">Open</label><input type="time" id="from" value="07:00" required></div>
+          <div><label for="to">Close</label><input type="time" id="to" value="22:00" required></div>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <label class="lbl" for="min">Minimum free gap</label>
+        <select id="min">
+          <option value="0">Any length</option>
+          <option value="30" selected>30 minutes</option>
+          <option value="60">1 hour</option>
+          <option value="90">1.5 hours</option>
+          <option value="120">2 hours</option>
+          <option value="180">3 hours</option>
+        </select>
+      </fieldset>
+
+      <button class="primary" id="go" type="submit">Find availability</button>
+    </form>
+
+    <section class="results" id="results" aria-live="polite">
+      <div class="card welcome" id="welcome">
+        <h2>Find a free room</h2>
+        <ol>
+          <li>Add one or more rooms (try typing <b>CASE</b>).</li>
+          <li>Choose the dates and the hours you care about.</li>
+          <li>Hit <b>Find availability</b> &mdash; view it as a table or timeline, or download the CSV.</li>
+        </ol>
+      </div>
+    </section>
+  </div>
+</div>
+
+<script>
+'use strict';
+const $ = (sel, el = document) => el.querySelector(sel);
+
+/* Build DOM safely (event names come from 25Live, so never use innerHTML). */
+function h(tag, attrs = {}, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (v == null || v === false) continue;
+    if (k === 'class') el.className = v;
+    else if (k === 'text') el.textContent = v;
+    else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+    else el.setAttribute(k, v === true ? '' : v);
+  }
+  for (const kid of kids.flat()) {
+    if (kid == null || kid === false) continue;
+    el.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
+  }
+  return el;
+}
+
+const norm = s => s.replace(/[\s_-]+/g, '').toUpperCase();
+const pad = n => String(n).padStart(2, '0');
+const iso = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const parseISO = s => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
+const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+const fmtMin = m => { const h24 = Math.floor(m / 60), mm = m % 60, ap = h24 >= 12 ? 'PM' : 'AM';
+  return `${((h24 + 11) % 12) + 1}${mm ? ':' + pad(mm) : ''} ${ap}`; };
+const fmtDur = m => { const h = Math.floor(m / 60), mm = m % 60; return h ? (mm ? `${h}h ${mm}m` : `${h}h`) : `${mm}m`; };
+const prettyDate = s => parseISO(s).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+
+/* ---------------------------------------------------------------- state */
+const PAGE = 500;
+const state = {
+  rooms: [], rows: [], missing: [], meta: null, params: null,
+  view: 'table', status: 'free', filter: '', sortKey: null, sortDir: 1, limit: PAGE,
+};
+let ctrl = null;                 // in-flight search
+const store = {
+  get(k) { try { return JSON.parse(localStorage.getItem('ra.' + k)); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem('ra.' + k, JSON.stringify(v)); } catch { /* ignore */ } },
+};
+
+/* ---------------------------------------------------------------- room picker */
+const input = $('#room-input'), suggest = $('#suggest');
+let sugItems = [], sugActive = -1, sugSeq = 0, sugTimer = null;
+
+function renderChips() {
+  const box = $('#chips');
+  box.replaceChildren(...state.rooms.map(r =>
+    h('span', { class: 'chip' }, r,
+      h('button', { type: 'button', 'aria-label': `Remove ${r}`, onclick: () => removeRoom(r) }, '×'))));
+  $('#clear-rooms').hidden = state.rooms.length < 2;
+  store.set('rooms', state.rooms);
+}
+function addRooms(names) {
+  for (const raw of names) {
+    const n = raw.trim();
+    if (n && !state.rooms.some(r => norm(r) === norm(n))) state.rooms.push(n);
+  }
+  renderChips();
+}
+function removeRoom(name) { state.rooms = state.rooms.filter(r => r !== name); renderChips(); }
+
+function closeSuggest() { suggest.hidden = true; input.setAttribute('aria-expanded', 'false'); sugActive = -1; }
+function setActive(i) {
+  sugActive = i;
+  [...suggest.querySelectorAll('.opt')].forEach((el, idx) => el.setAttribute('aria-selected', idx === i));
+  const el = suggest.querySelectorAll('.opt')[i]; if (el) el.scrollIntoView({ block: 'nearest' });
+}
+function renderSuggest(q, rooms) {
+  const prefix = rooms.filter(r => r.name.toUpperCase().startsWith(q.toUpperCase()));
+  const fresh = prefix.filter(r => !state.rooms.some(x => norm(x) === norm(r.name)));
+  sugItems = [];
+  const els = [];
+  if (fresh.length > 1) {
+    sugItems.push(() => addRooms(fresh.map(r => r.name)));
+    els.push(['all', `Add all ${fresh.length} rooms starting with “${q}”`, '']);
+  }
+  for (const r of rooms) {
+    const have = state.rooms.some(x => norm(x) === norm(r.name));
+    sugItems.push(have ? null : () => addRooms([r.name]));
+    els.push(['', r.name, `${r.capacity ? r.capacity + ' seats' : ''}${have ? ' · added' : ''}`, have]);
+  }
+  if (!els.length) { suggest.replaceChildren(h('div', { class: 'empty' }, `No rooms match “${q}”.`)); }
+  else suggest.replaceChildren(...els.map(([cls, a, b, dis], i) =>
+    h('button', { type: 'button', class: 'opt ' + cls, role: 'option', 'aria-selected': 'false', disabled: dis,
+      onmousedown: e => e.preventDefault(),
+      onclick: () => { sugItems[i]?.(); input.value = ''; closeSuggest(); input.focus(); } },
+      h('span', {}, a), h('small', {}, b))));
+  suggest.hidden = false; input.setAttribute('aria-expanded', 'true'); sugActive = -1;
+}
+async function fetchSuggest(q) {
+  const seq = ++sugSeq;
+  try {
+    const res = await fetch('/api/rooms?q=' + encodeURIComponent(q));
+    const data = await res.json();
+    if (seq === sugSeq && input.value.trim() === q) renderSuggest(q, data.rooms || []);
+  } catch { if (seq === sugSeq) closeSuggest(); }
+}
+input.addEventListener('input', () => {
+  clearTimeout(sugTimer);
+  const q = input.value.trim();
+  if (q.length < 2 || /[,\n]/.test(q)) return closeSuggest();
+  sugTimer = setTimeout(() => fetchSuggest(q), 220);
+});
+input.addEventListener('keydown', e => {
+  const n = suggest.querySelectorAll('.opt:not([disabled])').length;
+  if (e.key === 'ArrowDown' && !suggest.hidden) { e.preventDefault(); setActive(Math.min(sugActive + 1, sugItems.length - 1)); }
+  else if (e.key === 'ArrowUp' && !suggest.hidden) { e.preventDefault(); setActive(Math.max(sugActive - 1, 0)); }
+  else if (e.key === 'Escape') closeSuggest();
+  else if (e.key === 'Enter') {
+    e.preventDefault();
+    if (!suggest.hidden && sugActive >= 0 && sugItems[sugActive]) { sugItems[sugActive](); }
+    else commitPending();
+    input.value = ''; closeSuggest();
+  } else if (e.key === 'Backspace' && !input.value && state.rooms.length) removeRoom(state.rooms[state.rooms.length - 1]);
+});
+input.addEventListener('paste', e => {
+  const text = (e.clipboardData || window.clipboardData).getData('text');
+  if (/[,\n\r]/.test(text)) { e.preventDefault(); addRooms(text.split(/[,\n\r]+/)); }
+});
+input.addEventListener('blur', () => setTimeout(closeSuggest, 120));
+function commitPending() {
+  const t = input.value.trim();
+  if (t) { addRooms(t.split(/[,\n\r]+/)); input.value = ''; }
+}
+$('#clear-rooms').addEventListener('click', () => { state.rooms = []; renderChips(); input.focus(); });
+
+/* ---------------------------------------------------------------- dates & options */
+function setDates(a, b) { $('#start').value = iso(a); $('#end').value = iso(b); }
+document.querySelectorAll('[data-preset]').forEach(btn => btn.addEventListener('click', () => {
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const p = btn.dataset.preset;
+  if (p === 'today') setDates(today, today);
+  else if (p === 'week') { const mon = addDays(today, -((today.getDay() + 6) % 7)); setDates(mon, addDays(mon, 6)); }
+  else setDates(today, addDays(today, Number(p) - 1));
+}));
+
+/* ---------------------------------------------------------------- search */
+const resultsEl = $('#results');
+function setLoading(on) {
+  const b = $('#go');
+  b.disabled = on;
+  b.replaceChildren(...(on ? [h('span', { class: 'spinner' }), 'Searching…'] : ['Find availability']));
+}
+function showBanner(kind, ...kids) { return h('div', { class: 'banner ' + kind, role: kind === 'error' ? 'alert' : null }, ...kids); }
+
+function buildParams() {
+  return {
+    rooms: state.rooms.join(','),
+    start: $('#start').value, end: $('#end').value,
+    hours: `${$('#from').value}-${$('#to').value}`,
+    min: $('#min').value,
+  };
+}
+const qsOf = (p, extra = {}) => new URLSearchParams({ ...p, ...extra }).toString();
+
+async function search() {
+  commitPending();
+  const p = buildParams();
+  let err = null;
+  if (!state.rooms.length) err = 'Add at least one room.';
+  else if (!p.start || !p.end) err = 'Pick a start and end date.';
+  else if (p.end < p.start) err = 'The end date is before the start date.';
+  else if (!$('#from').value || !$('#to').value || $('#to').value <= $('#from').value) err = 'Closing time must be after opening time.';
+  if (err) { resultsEl.replaceChildren(showBanner('error', err)); return; }
+
+  store.set('opts', { from: $('#from').value, to: $('#to').value, min: $('#min').value });
+  if (ctrl) ctrl.abort();
+  ctrl = new AbortController();
+  setLoading(true);
+  resultsEl.replaceChildren(h('div', { class: 'card empty-state' }, h('span', { class: 'spinner' }), 'Checking 25Live…'));
+  try {
+    const res = await fetch('/api/availability?' + qsOf(p, { show: 'all' }), { signal: ctrl.signal });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+    Object.assign(state, { rows: data.rows, missing: data.missing, meta: data, params: p, limit: PAGE });
+    render();
+  } catch (e) {
+    if (e.name === 'AbortError') return;
+    resultsEl.replaceChildren(showBanner('error', e.message || 'Something went wrong.'));
+  } finally { setLoading(false); }
+}
+$('#form').addEventListener('submit', e => { e.preventDefault(); search(); });
+
+/* ---------------------------------------------------------------- results */
+function visibleRows() {
+  const f = state.filter.trim().toLowerCase();
+  let rows = state.rows.filter(r => (state.status === 'all' || r.status === state.status) &&
+    (!f || `${r.room} ${r.event} ${r.date} ${r.weekday} ${r.status}`.toLowerCase().includes(f)));
+  if (state.sortKey) {
+    const k = state.sortKey, d = state.sortDir;
+    const val = r => k === 'start' ? r.start_min : k === 'end' ? r.end_min : k === 'capacity' ? Number(r.capacity) || 0 : r[k];
+    rows = rows.slice().sort((a, b) => {
+      const x = val(a), y = val(b);
+      return (x < y ? -1 : x > y ? 1 : 0) * d || a.room.localeCompare(b.room) || a.date.localeCompare(b.date) || a.start_min - b.start_min;
+    });
+  }
+  return rows;
+}
+
+function render() {
+  const rows = visibleRows();
+  const freeRows = state.rows.filter(r => r.status === 'free');
+  const freeMin = freeRows.reduce((s, r) => s + r.end_min - r.start_min, 0);
+  const roomNames = [...new Set(state.rows.map(r => r.room))];
+  const nodes = [];
+
+  if (state.missing.length) {
+    nodes.push(showBanner('warn',
+      `Couldn’t find: ${state.missing.map(m => m.room).join(', ')}. `,
+      ...state.missing.filter(m => m.suggestions.length).map(m =>
+        h('span', {}, `Instead of ${m.room}: `, h('span', { class: 'sugg' }, m.suggestions.map(s =>
+          h('button', { type: 'button', onclick: () => { state.rooms = state.rooms.map(r => r === m.room ? s : r); renderChips(); search(); } }, s)))))));
+  }
+
+  nodes.push(h('div', { class: 'card summary' },
+    stat(roomNames.length, roomNames.length === 1 ? 'room' : 'rooms'),
+    stat(`${prettyDate(state.meta.start)} – ${prettyDate(state.meta.end)}`, `${fmtMin(state.meta.open_min)} – ${fmtMin(state.meta.close_min)} daily`),
+    stat(freeRows.length, 'free windows'),
+    stat(fmtDur(freeMin), 'total free time')));
+
+  const statusBtn = (v, label) => h('button', { type: 'button', 'aria-pressed': String(state.status === v), onclick: () => { state.status = v; state.limit = PAGE; render(); } }, label);
+  const viewBtn = (v, label) => h('button', { type: 'button', 'aria-pressed': String(state.view === v), onclick: () => { state.view = v; render(); } }, label);
+  const filterIn = h('input', { type: 'text', class: 'grow', placeholder: 'Filter by room, day, or event…', 'aria-label': 'Filter results', value: state.filter,
+    oninput: e => { state.filter = e.target.value; state.limit = PAGE; renderBody(); } });
+  nodes.push(h('div', { class: 'card toolbar' },
+    h('div', { class: 'seg', role: 'group', 'aria-label': 'Show' }, statusBtn('free', 'Free'), statusBtn('busy', 'Busy'), statusBtn('all', 'All')),
+    h('div', { class: 'seg', role: 'group', 'aria-label': 'View' }, viewBtn('table', 'Table'), viewBtn('timeline', 'Timeline')),
+    filterIn,
+    h('button', { type: 'button', onclick: downloadCsv, title: 'Downloads the rows for the Free / Busy / All choice' }, '↓ Download CSV')));
+
+  nodes.push(h('div', { class: 'card', id: 'body' }));
+  resultsEl.replaceChildren(...nodes);
+  renderBody();
+}
+const stat = (big, small) => h('div', { class: 'stat' }, h('b', {}, big), h('span', {}, small));
+
+function renderBody() {
+  const body = $('#body'); if (!body) return;
+  const rows = visibleRows();
+  if (!rows.length) {
+    body.replaceChildren(h('div', { class: 'empty-state' },
+      state.rows.length ? 'Nothing matches the current filter.'
+        : state.status === 'free' ? 'No free time found in that window. Try a shorter minimum gap or wider hours.' : 'No results.'));
+    return;
+  }
+  body.replaceChildren(state.view === 'table' ? tableView(rows) : timelineView(rows));
+}
+
+function tableView(rows) {
+  const cols = [['room', 'Room'], ['capacity', 'Seats'], ['date', 'Date'], ['start', 'Start'], ['end', 'End'], ['status', 'Status'], ['event', 'Event']];
+  const head = h('tr', {}, cols.map(([k, label]) =>
+    h('th', { scope: 'col', 'aria-sort': state.sortKey === k ? (state.sortDir > 0 ? 'ascending' : 'descending') : 'none' },
+      h('button', { type: 'button', onclick: () => { state.sortDir = state.sortKey === k ? -state.sortDir : 1; state.sortKey = k; renderBody(); } },
+        label, h('span', { class: 'arrow', 'aria-hidden': 'true' }, state.sortKey === k ? (state.sortDir > 0 ? '▲' : '▼') : '')))));
+  const shown = rows.slice(0, state.limit);
+  const tbody = h('tbody', {}, shown.map(r => h('tr', {},
+    h('td', {}, r.room), h('td', { class: 'muted' }, r.capacity),
+    h('td', {}, `${r.weekday} ${prettyDate(r.date)}`), h('td', {}, r.start), h('td', {}, r.end),
+    h('td', {}, h('span', { class: 'badge ' + r.status }, r.status)),
+    h('td', { class: 'event' }, r.event, r.event_state ? h('span', { class: 'muted' }, ` · ${r.event_state}`) : null))));
+  const more = rows.length > shown.length
+    ? h('div', { class: 'more' }, h('button', { type: 'button', onclick: () => { state.limit += PAGE; renderBody(); } }, `Show more (${rows.length - shown.length} left)`))
+    : null;
+  return h('div', {}, h('div', { class: 'tablewrap' }, h('table', {}, h('thead', {}, head), tbody)), more);
+}
+
+function timelineView(rows) {
+  const { open_min: o, close_min: c } = state.meta, span = c - o;
+  const pct = m => ((m - o) / span) * 100;
+  const rooms = [...new Set(rows.map(r => r.room))];
+  const days = []; for (let d = parseISO(state.meta.start), end = parseISO(state.meta.end); d <= end; d = addDays(d, 1)) days.push(d);
+  const step = span > 14 * 60 ? 120 : 60;
+  const ticks = []; for (let m = Math.ceil(o / step) * step; m <= c; m += step) ticks.push(m);
+  const byKey = new Map();
+  for (const r of rows) { const k = r.room + '|' + r.date; (byKey.get(k) || byKey.set(k, []).get(k)).push(r); }
+  const cap = Object.fromEntries(rows.map(r => [r.room, r.capacity]));
+
+  const axis = () => h('div', { class: 'tl-row' }, h('div'),
+    h('div', { class: 'tl-axis' }, ticks.map(m => h('span', { style: `left:${pct(m)}%` }, fmtMin(m).replace(':00', '').replace(' ', '').toLowerCase()))));
+
+  const sections = rooms.map(room => h('section', { class: 'tl-room' },
+    h('h3', {}, room, cap[room] ? h('small', {}, ` · ${cap[room]} seats`) : null),
+    axis(),
+    days.map(d => {
+      const day = iso(d), segs = byKey.get(room + '|' + day) || [];
+      return h('div', { class: 'tl-row' },
+        h('div', { class: 'tl-label' + ([0, 6].includes(d.getDay()) ? ' weekend' : '') }, `${d.toLocaleDateString(undefined, { weekday: 'short' })} ${d.getMonth() + 1}/${d.getDate()}`),
+        h('div', { class: 'tl-bar' },
+          ticks.map(m => h('div', { class: 'tl-grid', style: `left:${pct(m)}%` })),
+          segs.map(r => {
+            const w = pct(r.end_min) - pct(r.start_min);
+            const label = r.status === 'free' ? `${r.start}–${r.end}` : r.event;
+            return h('div', { class: r.status === 'free' ? 'seg-free' : 'seg-busy',
+              style: `left:${pct(r.start_min)}%;width:${w}%`,
+              title: `${r.status === 'free' ? 'Free' : 'Busy'} ${r.start} – ${r.end}${r.event ? ' · ' + r.event : ''}` },
+              w > 9 ? label : '');
+          })));
+    })));
+  return h('div', {},
+    h('div', { class: 'legend' }, h('span', {}, h('i', { class: 'f' }), 'Free'), h('span', {}, h('i', { class: 'b' }), 'Busy (class or event)')),
+    h('div', { class: 'timeline' }, sections));
+}
+
+function downloadCsv() {
+  if (!state.params) return;
+  const a = h('a', { href: '/api/availability.csv?' + qsOf(state.params, { show: state.status }) });
+  document.body.append(a); a.click(); a.remove();
+}
+
+/* ---------------------------------------------------------------- init */
+(function init() {
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  setDates(today, addDays(today, 6));
+  const opts = store.get('opts');
+  if (opts) { $('#from').value = opts.from || '07:00'; $('#to').value = opts.to || '22:00'; $('#min').value = opts.min || '0'; }
+  const saved = store.get('rooms');
+  if (Array.isArray(saved)) state.rooms = saved.filter(x => typeof x === 'string');
+  renderChips();
+})();
+</script>
+</body>
+</html>

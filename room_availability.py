@@ -18,7 +18,7 @@ Examples
     python room_availability.py CASE134 --show busy
     python room_availability.py CASE134 --show all --hours 08:00-20:00
 
-Only the standard library is used.
+The same logic powers the web UI (see app.py). Only the standard library is used.
 """
 from __future__ import annotations
 
@@ -30,11 +30,17 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, time, timedelta
 
 BASE = "https://25live.collegenet.com/25live/data/fiu/run"
 INCLUDE = "closed blackouts pending related empty"  # same flags the website sends
 HEADERS = {"User-Agent": "room-availability-script/1.0", "Accept": "application/json"}
+CSV_COLUMNS = ["room", "capacity", "date", "weekday", "start", "end", "status", "event", "event_state"]
+
+
+class ApiError(Exception):
+    """25Live could not be reached or returned an error."""
 
 
 # --------------------------------------------------------------------------- #
@@ -47,9 +53,9 @@ def get_json(endpoint: str, params: dict) -> dict:
         with urllib.request.urlopen(req, timeout=30) as resp:
             return json.load(resp)
     except urllib.error.HTTPError as e:
-        raise SystemExit(f"HTTP {e.code} from 25Live for {url}")
+        raise ApiError(f"25Live returned HTTP {e.code}")
     except urllib.error.URLError as e:
-        raise SystemExit(f"Could not reach 25Live ({e.reason})")
+        raise ApiError(f"Could not reach 25Live ({e.reason})")
 
 
 def as_list(x) -> list:
@@ -63,17 +69,19 @@ def norm(name: str) -> str:
     return re.sub(r"[\s_-]+", "", name).upper()
 
 
-def find_space(room: str) -> dict | None:
-    """Resolve a room name like 'CASE132' to its 25Live space record (exact match)."""
-    data = get_json("spaces.json", {"name": room, "caller": "room-availability"})
-    spaces = as_list(data.get("spaces", {}).get("space"))
+def search_spaces(query: str) -> list[dict]:
+    """All spaces whose name contains `query` (25Live does a 'contains' match)."""
+    data = get_json("spaces.json", {"name": query, "caller": "room-availability"})
+    return as_list(data.get("spaces", {}).get("space"))
+
+
+def find_space(room: str) -> tuple[dict | None, list[str]]:
+    """Resolve 'CASE132' to its space record (exact match). Returns (space, suggestions)."""
+    spaces = search_spaces(room)
     for s in spaces:
         if norm(s["space_name"]) == norm(room):
-            return s
-    close = ", ".join(s["space_name"] for s in spaces[:8])
-    print(f"  ! '{room}' not found." + (f" Did you mean: {close}?" if close else ""),
-          file=sys.stderr)
-    return None
+            return s, []
+    return None, [s["space_name"] for s in spaces[:8]]
 
 
 def get_bookings(space_id: int, start: date, end: date) -> list[tuple[datetime, datetime, dict]]:
@@ -125,6 +133,81 @@ def free_windows(day_start: datetime, day_end: datetime, busy):
     return free
 
 
+def fmt(dt: datetime) -> str:
+    return dt.strftime("%I:%M %p").lstrip("0")
+
+
+def minutes(dt: datetime) -> int:
+    return dt.hour * 60 + dt.minute
+
+
+# --------------------------------------------------------------------------- #
+# Core: rooms + dates -> rows
+# --------------------------------------------------------------------------- #
+def rows_for_room(space: dict, bookings, start: date, end: date,
+                  open_t: time, close_t: time, show: str, min_minutes: int) -> list[dict]:
+    rows = []
+    cap = space.get("max_capacity", "")
+    busy = [(s, e) for s, e, _ in bookings]
+    day = start
+    while day <= end:
+        d_start = datetime.combine(day, open_t)
+        d_end = datetime.combine(day, close_t)
+        base = {"room": space["space_name"], "capacity": cap,
+                "date": day.isoformat(), "weekday": day.strftime("%a")}
+
+        if show in ("free", "all"):
+            for s, e in free_windows(d_start, d_end, busy):
+                if (e - s) >= timedelta(minutes=max(min_minutes, 1)):
+                    rows.append({**base, "start": fmt(s), "end": fmt(e), "status": "free",
+                                 "event": "", "event_state": "",
+                                 "start_min": minutes(s), "end_min": minutes(e)})
+        if show in ("busy", "all"):
+            for s, e, info in bookings:
+                cs, ce = max(s, d_start), min(e, d_end)
+                if ce > cs:
+                    rows.append({**base, "start": fmt(cs), "end": fmt(ce), "status": "busy",
+                                 "event": info["event"], "event_state": info["state"],
+                                 "start_min": minutes(cs), "end_min": minutes(ce)})
+        day += timedelta(days=1)
+    return rows
+
+
+def collect_rows(rooms: list[str], start: date, end: date,
+                 open_t: time = time(7, 0), close_t: time = time(22, 0),
+                 show: str = "free", min_minutes: int = 0):
+    """
+    Look up every room and build availability rows.
+
+    Returns (rows, missing) where `missing` is a list of {"room", "suggestions"}.
+    Raises ApiError if 25Live can't be reached.
+    """
+    def work(room):
+        space, suggestions = find_space(room)
+        if not space:
+            return room, None, [], suggestions
+        return room, space, get_bookings(space["space_id"], start, end), []
+
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        results = list(pool.map(work, rooms))  # keeps input order, re-raises ApiError
+
+    rows, missing = [], []
+    for room, space, bookings, suggestions in results:
+        if space is None:
+            missing.append({"room": room, "suggestions": suggestions})
+            continue
+        rows += rows_for_room(space, bookings, start, end, open_t, close_t, show, min_minutes)
+
+    rows.sort(key=lambda r: (r["room"], r["date"], r["start_min"], r["status"]))
+    return rows, missing
+
+
+def write_csv(rows: list[dict], fileobj) -> None:
+    w = csv.DictWriter(fileobj, fieldnames=CSV_COLUMNS, extrasaction="ignore")
+    w.writeheader()
+    w.writerows(rows)
+
+
 # --------------------------------------------------------------------------- #
 # CLI
 # --------------------------------------------------------------------------- #
@@ -133,9 +216,12 @@ def parse_hours(text: str) -> tuple[time, time]:
     if not m:
         raise argparse.ArgumentTypeError("use HH:MM-HH:MM, e.g. 07:00-22:00")
     h1, m1, h2, m2 = map(int, m.groups())
-    if h2 == 24 and m2 == 0:
-        return time(h1, m1), time.max.replace(microsecond=0)
-    return time(h1, m1), time(h2, m2)
+    if (h2, m2) == (24, 0):
+        return time(h1, m1), time(23, 59)
+    try:
+        return time(h1, m1), time(h2, m2)
+    except ValueError:
+        raise argparse.ArgumentTypeError("hours out of range")
 
 
 def read_rooms(args) -> list[str]:
@@ -151,10 +237,6 @@ def read_rooms(args) -> list[str]:
             seen.add(norm(r))
             unique.append(r)
     return unique
-
-
-def fmt(dt: datetime) -> str:
-    return dt.strftime("%I:%M %p").lstrip("0")
 
 
 def main():
@@ -182,50 +264,20 @@ def main():
         p.error("end date is before start date")
     open_t, close_t = args.hours
 
-    rows, missing = [], []
-    for room in rooms:
-        print(f"{room}: ", end="", flush=True)
-        space = find_space(room)
-        if not space:
-            missing.append(room)
-            continue
-        bookings = get_bookings(space["space_id"], args.start, end)
-        print(f"{len(bookings)} bookings")
-        cap = space.get("max_capacity", "")
+    try:
+        rows, missing = collect_rows(rooms, args.start, end, open_t, close_t,
+                                     args.show, args.min_minutes)
+    except ApiError as e:
+        raise SystemExit(str(e))
 
-        day = args.start
-        while day <= end:
-            d_start = datetime.combine(day, open_t)
-            d_end = datetime.combine(day, close_t)
-            base = {"room": space["space_name"], "capacity": cap,
-                    "date": day.isoformat(), "weekday": day.strftime("%a")}
-            busy = [(s, e) for s, e, _ in bookings]
-
-            if args.show in ("free", "all"):
-                for s, e in free_windows(d_start, d_end, busy):
-                    if (e - s) >= timedelta(minutes=max(args.min_minutes, 1)):
-                        rows.append({**base, "start": fmt(s), "end": fmt(e), "status": "free",
-                                     "event": "", "event_state": "",
-                                     "_sort": (space["space_name"], s)})
-            if args.show in ("busy", "all"):
-                for s, e, info in bookings:
-                    cs, ce = max(s, d_start), min(e, d_end)
-                    if ce > cs:
-                        rows.append({**base, "start": fmt(cs), "end": fmt(ce), "status": "busy",
-                                     "event": info["event"], "event_state": info["state"],
-                                     "_sort": (space["space_name"], cs)})
-            day += timedelta(days=1)
-
-    rows.sort(key=lambda r: (r["room"], r["date"], r["_sort"][1]))
-    cols = ["room", "capacity", "date", "weekday", "start", "end", "status", "event", "event_state"]
     with open(args.output, "w", newline="", encoding="utf-8-sig") as f:  # BOM so Excel reads UTF-8
-        w = csv.DictWriter(f, fieldnames=cols, extrasaction="ignore")
-        w.writeheader()
-        w.writerows(rows)
+        write_csv(rows, f)
 
-    print(f"\nWrote {len(rows)} rows to {args.output}")
+    print(f"Wrote {len(rows)} rows for {len(rooms) - len(missing)} room(s) to {args.output}")
+    for m in missing:
+        hint = f" Did you mean: {', '.join(m['suggestions'])}?" if m["suggestions"] else ""
+        print(f"  ! '{m['room']}' not found.{hint}", file=sys.stderr)
     if missing:
-        print(f"Rooms not found: {', '.join(missing)}", file=sys.stderr)
         sys.exit(1)
 
 
